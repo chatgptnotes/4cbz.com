@@ -1,0 +1,86 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import errorHandler from './middleware/errorHandler.js';
+import logger from './utils/logger.js';
+
+// Import routes
+import authRoutes from './routes/auth.routes.js';
+import documentRoutes from './routes/document.routes.js';
+import paymentRoutes from './routes/payment.routes.js';
+import userRoutes from './routes/user.routes.js';
+import folderRoutes from './routes/folder.routes.js';
+import settingsRoutes from './routes/settings.routes.js';
+import publicDocumentRoutes, { publicRouter as publicDocumentPublicRoutes } from './routes/publicDocument.routes.js';
+
+const app = express();
+
+// Trust proxy - required for Railway/cloud deployments
+app.set('trust proxy', 1);
+
+// Security middleware
+app.use(helmet());
+
+// CORS configuration
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/api/', limiter);
+
+// Stripe webhook needs raw body - must come BEFORE express.json()
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+
+// Body parsing middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.path}`, {
+    ip: req.ip,
+    userAgent: req.get('user-agent')
+  });
+  next();
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    service: '4Csecure Backend'
+  });
+});
+
+// API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/documents', documentRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/folders', folderRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/public-documents', publicDocumentRoutes); // Admin routes for managing public documents
+app.use('/api/public', publicDocumentPublicRoutes); // Public access route (no authentication required)
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found'
+  });
+});
+
+// Global error handler (must be last)
+app.use(errorHandler);
+
+export default app;
